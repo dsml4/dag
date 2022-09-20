@@ -1,28 +1,27 @@
-from ast import In
-from dagster import job, op, get_dagster_logger, Field, Out, In
-# from dsml4s8e import runner
+from codecs import strict_errors
+import sys
 from typing import Tuple
+from dagster import job, op, get_dagster_logger, Field, Out, In
+
+sys.path.extend(['.', '..'])
+from dsml4s8e import dag_params, runner, nb_parser
 
 
-def get_op_by_nb_id(nb_id: str):
-    config_schema = {
+load_data_params = dag_params.NbOpParams('data_load.test')
+
+
+@op(
+    config_schema={
         "a": Field(
-            str,
+            int,
             description='nb params',
-            default_value='default a'
+            default_value=100
             )
-        }
-    out = {
-        "entity1": Out(str, description='from kafka topic entity1'),
-        "entity2": Out(str),
-        "unused": Out(str)
-    }
-    description = f'{nb_id}\nfull path'
-    return {"config_schema": config_schema, "out": out, "description": description}
-
-
-@op(**get_op_by_nb_id("load.notebook1"))
-def run_load(context) -> Tuple[str, str, str]:
+    },
+    description=load_data_params.description,
+    out=load_data_params.out
+)
+def run_load(context) -> Tuple[str, str]:
 
     # parameters to set to nb
     parameters = {
@@ -30,21 +29,28 @@ def run_load(context) -> Tuple[str, str, str]:
     # parameters from UI
     parameters['parameters']['a'] = context.op_config["a"]
 
-    nb_name = 'test.ipynb'
-    parameters['parameters']['nb_full_name'] = nb_name
-    context.log.info((__file__))
-    get_dagster_logger().info((parameters))
-    nb_output = 'test_out.ipynb'
-    # runner.run_notebooks(nb_name, nb_output, parameters=parameters)
-
-    out_nb = 'test.ipynb'
-    get_dagster_logger().info(f"{out_nb}")
-    # run_info = extract_results(nb_output)
-    # entity1 = run_info.out_urls
-    entity1 = 'entity1_url'
-    entity2 = 'entity2_url'
-    u = 'unused_url'
-    return (entity1, entity2, u)
+    nb_path = load_data_params.nb_path
+    parameters['parameters']['nb_full_name'] = nb_path
+    context.log.info((load_data_params.run_id))
+    context.log.info((nb_path))
+    context.log.info((parameters))
+    component_cd = runner.make_cache_dir(
+        load_data_params.compwd,
+        load_data_params.run_id
+        )
+    context.log.info((component_cd))
+    nb_out_path = runner.run_notebook(
+        nb_path=nb_path,
+        papermill_params=parameters,
+        component_cd=component_cd
+        )
+    context.log.info((nb_out_path))
+    results = nb_parser.get_results(nb_out_path)
+    context.log.info((results))
+    r = results['artefacts']
+    data1_url = r['pipeline_example.data_load.test.data1']
+    data2_url = r['pipeline_example.data_load.test.data2']
+    return (data1_url, data2_url)
 
 
 @op(
@@ -56,20 +62,17 @@ def run_load(context) -> Tuple[str, str, str]:
     out={},
 )
 def run_prep(context, entity1: str, entity2: str):
-    context.log.info("run_prep")
-    # locals() -> _resources_dict
-    # make_resources_dict((locals())
-    context.log.info(locals())
+    context.log.info(entity1)
+    context.log.info(entity2)
 
 
 @job
 def pipeline():
-    # new run id
+    load_data_params.run_id = runner.new_run_id()
     res_urls = run_load()
-    run_prep(*res_urls[:-1])
+    run_prep(*res_urls)
 
 
 if __name__ == "__main__":
-    result = pipeline.execute_in_process(run_config={
-        'ops': {'run_load': {'config': {'a': 'a=?'}}}
-    })
+    load_data_params.nb_path
+    print(load_data_params.parameters)
